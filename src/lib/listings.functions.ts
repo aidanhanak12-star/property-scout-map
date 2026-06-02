@@ -35,7 +35,16 @@ const FALLBACK_IMAGES = [
 export const searchListings = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => InputSchema.parse(data))
   .handler(async ({ data }) => {
+    const reqId = Math.random().toString(36).slice(2, 8);
+    const log = (...args: unknown[]) => console.log(`[rentcast ${reqId}]`, ...args);
+
     const apiKey = process.env.RENTCAST_API_KEY;
+    log("input", data);
+    log("env", {
+      hasKey: Boolean(apiKey),
+      keyLength: apiKey?.length ?? 0,
+      keyPreview: apiKey ? `${apiKey.slice(0, 4)}…${apiKey.slice(-2)}` : null,
+    });
     if (!apiKey) {
       return {
         listings: [] as Listing[],
@@ -51,29 +60,42 @@ export const searchListings = createServerFn({ method: "POST" })
       status: "Active",
     });
 
+    const url = `https://api.rentcast.io/v1/listings/sale?${params}`;
+    log("GET", url);
+
+    const startedAt = Date.now();
     try {
-      const res = await fetch(`https://api.rentcast.io/v1/listings/sale?${params}`, {
+      const res = await fetch(url, {
         headers: {
           "X-Api-Key": apiKey,
           Accept: "application/json",
         },
       });
 
+      const elapsedMs = Date.now() - startedAt;
+      log("response", {
+        status: res.status,
+        statusText: res.statusText,
+        elapsedMs,
+        contentType: res.headers.get("content-type"),
+      });
+
       if (!res.ok) {
         const text = await res.text().catch(() => "");
-        console.error("RentCast error", res.status, text);
+        log("error body", text.slice(0, 500));
         if (res.status === 404) {
           // RentCast returns 404 when no listings found in that area
           return { listings: [] as Listing[], error: null };
         }
         return {
           listings: [] as Listing[],
-          error: `RentCast request failed (${res.status})`,
+          error: `RentCast ${res.status} ${res.statusText}: ${text.slice(0, 200) || "no body"}`,
         };
       }
 
       const raw = (await res.json()) as unknown;
       const arr = Array.isArray(raw) ? raw : [];
+      log("ok", { count: arr.length });
 
       const listings: Listing[] = arr
         .map((item: any, idx: number): Listing | null => {
