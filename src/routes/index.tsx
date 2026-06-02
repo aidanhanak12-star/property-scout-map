@@ -1,6 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
-import { PROPERTIES, distanceKm, type Property } from "@/lib/properties";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import { distanceKm, KM_PER_MILE } from "@/lib/properties";
+import { searchListings, type Listing } from "@/lib/listings.functions";
 import { useGoogleMaps } from "@/hooks/useGoogleMaps";
 import { PropertyMap } from "@/components/PropertyMap";
 import { PlaceSearch } from "@/components/PlaceSearch";
@@ -13,7 +16,7 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "Explore real estate on an interactive map. Move the pin, adjust the radius, and see every listing in the area.",
+          "Explore real for-sale listings on an interactive map. Move the pin, adjust the radius, and see every home in the area.",
       },
       { property: "og:title", content: "Nestmap — Find homes within your radius" },
       {
@@ -27,26 +30,65 @@ export const Route = createFileRoute("/")({
 
 const DEFAULTS = { lat: 37.7749, lng: -122.4194, label: "San Francisco, CA" };
 
+function useDebounced<T>(value: T, ms: number): T {
+  const [v, setV] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return v;
+}
+
 function Index() {
-  const { ready, error } = useGoogleMaps();
+  const { ready, error: mapsError } = useGoogleMaps();
   const [center, setCenter] = useState(DEFAULTS);
-  const [radius, setRadius] = useState(5);
+  const [radius, setRadius] = useState(5); // km
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sort, setSort] = useState<"distance" | "price-asc" | "price-desc">("distance");
-  const [typeFilter, setTypeFilter] = useState<"All" | Property["type"]>("All");
+  const [typeFilter, setTypeFilter] = useState<string>("All");
+
+  const debouncedCenter = useDebounced(center, 400);
+  const debouncedRadius = useDebounced(radius, 400);
+
+  const search = useServerFn(searchListings);
+  const query = useQuery({
+    queryKey: [
+      "listings",
+      debouncedCenter.lat.toFixed(4),
+      debouncedCenter.lng.toFixed(4),
+      debouncedRadius,
+    ],
+    queryFn: () =>
+      search({
+        data: {
+          latitude: debouncedCenter.lat,
+          longitude: debouncedCenter.lng,
+          radiusMiles: Math.min(100, debouncedRadius / KM_PER_MILE),
+          limit: 200,
+        },
+      }),
+    staleTime: 60_000,
+  });
+
+  const listings: Listing[] = query.data?.listings ?? [];
+  const apiError = query.data?.error ?? (query.error ? "Failed to load listings" : null);
+
+  const types = useMemo(() => {
+    const s = new Set<string>();
+    listings.forEach((l) => s.add(l.type));
+    return ["All", ...Array.from(s).sort()];
+  }, [listings]);
 
   const visible = useMemo(() => {
-    const withDist = PROPERTIES.map((p) => ({
-      p,
-      d: distanceKm({ lat: p.lat, lng: p.lng }, center),
-    }))
+    const withDist = listings
+      .map((p) => ({ p, d: distanceKm({ lat: p.lat, lng: p.lng }, center) }))
       .filter((x) => x.d <= radius)
       .filter((x) => (typeFilter === "All" ? true : x.p.type === typeFilter));
     if (sort === "distance") withDist.sort((a, b) => a.d - b.d);
     if (sort === "price-asc") withDist.sort((a, b) => a.p.price - b.p.price);
     if (sort === "price-desc") withDist.sort((a, b) => b.p.price - a.p.price);
     return withDist;
-  }, [center, radius, sort, typeFilter]);
+  }, [listings, center, radius, sort, typeFilter]);
 
   return (
     <div className="flex h-screen flex-col bg-background">
@@ -59,7 +101,7 @@ function Index() {
           </div>
           <div>
             <h1 className="text-lg font-bold tracking-tight">Nestmap</h1>
-            <p className="text-xs text-muted-foreground">Find homes within your radius</p>
+            <p className="text-xs text-muted-foreground">Live listings from RentCast</p>
           </div>
         </div>
         <div className="flex-1 md:max-w-md">
@@ -77,18 +119,18 @@ function Index() {
         <div className="flex items-center gap-3 text-sm">
           <select
             value={typeFilter}
-            onChange={(e) => setTypeFilter(e.target.value as any)}
+            onChange={(e) => setTypeFilter(e.target.value)}
             className="rounded-full border border-border bg-card px-3 py-2 text-sm outline-none focus:border-primary"
           >
-            <option>All</option>
-            <option>House</option>
-            <option>Condo</option>
-            <option>Townhouse</option>
-            <option>Apartment</option>
+            {types.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
           </select>
           <select
             value={sort}
-            onChange={(e) => setSort(e.target.value as any)}
+            onChange={(e) => setSort(e.target.value as typeof sort)}
             className="rounded-full border border-border bg-card px-3 py-2 text-sm outline-none focus:border-primary"
           >
             <option value="distance">Nearest</option>
@@ -99,12 +141,11 @@ function Index() {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
         <aside className="hidden w-[400px] flex-col border-r border-border bg-card md:flex">
           <div className="space-y-3 border-b border-border p-5">
             <div className="flex items-baseline justify-between">
               <h2 className="text-base font-semibold">
-                {visible.length} {visible.length === 1 ? "home" : "homes"}
+                {query.isFetching ? "Searching…" : `${visible.length} ${visible.length === 1 ? "home" : "homes"}`}
               </h2>
               <span className="text-xs text-muted-foreground">
                 within {radius} km of {center.label}
@@ -131,13 +172,18 @@ function Index() {
               </div>
             </div>
             <p className="text-[11px] leading-relaxed text-muted-foreground">
-              Tip: click anywhere on the map or drag the orange pin to recenter the search.
+              Tip: click anywhere on the map or drag the orange pin to recenter. Listings refresh automatically.
             </p>
+            {apiError && (
+              <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+                {apiError}
+              </div>
+            )}
           </div>
           <div className="flex-1 space-y-2 overflow-y-auto p-4">
-            {visible.length === 0 && (
+            {!query.isFetching && visible.length === 0 && !apiError && (
               <div className="rounded-2xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-                No homes in this area. Try expanding the radius or moving the pin.
+                No active for-sale listings in this area. Try expanding the radius or moving the pin to a US city.
               </div>
             )}
             {visible.map(({ p, d }) => (
@@ -152,14 +198,13 @@ function Index() {
           </div>
         </aside>
 
-        {/* Map */}
         <main className="relative flex-1">
-          {error && (
+          {mapsError && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-background p-6 text-center text-sm text-destructive">
-              {error}
+              {mapsError}
             </div>
           )}
-          {!ready && !error && (
+          {!ready && !mapsError && (
             <div className="absolute inset-0 z-10 flex items-center justify-center bg-muted">
               <div className="text-sm text-muted-foreground">Loading map…</div>
             </div>
@@ -169,10 +214,18 @@ function Index() {
               center={{ lat: center.lat, lng: center.lng }}
               radiusKm={radius}
               properties={visible.map((v) => v.p)}
-              onCenterChange={(c) => setCenter({ ...c, label: "Custom location" })}
+              onCenterChange={(c) => {
+                setCenter({ ...c, label: "Custom location" });
+                setSelectedId(null);
+              }}
               selectedId={selectedId}
               onSelect={setSelectedId}
             />
+          )}
+          {query.isFetching && ready && (
+            <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-full bg-card px-4 py-2 text-xs font-medium text-foreground shadow-md">
+              Loading listings…
+            </div>
           )}
         </main>
       </div>

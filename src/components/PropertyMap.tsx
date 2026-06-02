@@ -1,10 +1,10 @@
 import { useEffect, useRef } from "react";
-import type { Property } from "@/lib/properties";
+import type { Listing } from "@/lib/listings.functions";
 
 type Props = {
   center: { lat: number; lng: number };
   radiusKm: number;
-  properties: Property[];
+  properties: Listing[];
   onCenterChange: (c: { lat: number; lng: number }) => void;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
