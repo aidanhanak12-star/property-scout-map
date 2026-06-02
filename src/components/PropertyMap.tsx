@@ -24,6 +24,7 @@ export function PropertyMap({
   const circleRef = useRef<google.maps.Circle | null>(null);
   const centerMarkerRef = useRef<google.maps.Marker | null>(null);
   const markersRef = useRef<Map<string, google.maps.Marker>>(new Map());
+  const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
 
   // Init map
   useEffect(() => {
@@ -103,6 +104,10 @@ export function PropertyMap({
   useEffect(() => {
     if (!mapRef.current) return;
     const map = mapRef.current;
+    if (!infoWindowRef.current) {
+      infoWindowRef.current = new google.maps.InfoWindow();
+    }
+    const info = infoWindowRef.current;
     const existing = markersRef.current;
     const nextIds = new Set(properties.map((p) => p.id));
 
@@ -118,6 +123,10 @@ export function PropertyMap({
       let m = existing.get(p.id);
       const isSelected = p.id === selectedId;
       const label = `$${Math.round(p.price / 1000)}k`;
+      const openInfo = () => {
+        info.setContent(renderInfoHtml(p));
+        info.open({ map, anchor: m! });
+      };
       if (!m) {
         m = new google.maps.Marker({
           map,
@@ -130,7 +139,10 @@ export function PropertyMap({
           },
           icon: pillIcon(isSelected),
         });
-        m.addListener("click", () => onSelect(p.id));
+        m.addListener("click", () => {
+          onSelect(p.id);
+          openInfo();
+        });
         existing.set(p.id, m);
       } else {
         m.setIcon(pillIcon(isSelected));
@@ -141,10 +153,43 @@ export function PropertyMap({
           fontWeight: "600",
         });
       }
+
+      if (isSelected) openInfo();
     });
+
+    if (!selectedId) info.close();
   }, [properties, selectedId, onSelect]);
 
   return <div ref={ref} className="h-full w-full" />;
+}
+
+function renderInfoHtml(p: Listing): string {
+  const price = p.price.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
+  const sqft = p.sqft ? `${p.sqft.toLocaleString()} sqft` : "Size n/a";
+  const img = p.image
+    ? `<img src="${p.image}" alt="" style="width:100%;height:120px;object-fit:cover;display:block;" />`
+    : "";
+  const title = escapeHtml(p.title);
+  return `
+    <div style="width:220px;font-family:inherit;">
+      ${img}
+      <div style="padding:8px 4px 4px;">
+        <div style="font-weight:700;font-size:15px;color:#0f172a;">${price}</div>
+        <div style="font-size:12px;color:#475569;margin-top:2px;">${sqft}</div>
+        <div style="font-size:11px;color:#64748b;margin-top:4px;line-height:1.3;">${title}</div>
+      </div>
+    </div>
+  `;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!),
+  );
 }
 
 function pillIcon(selected: boolean): google.maps.Symbol {
