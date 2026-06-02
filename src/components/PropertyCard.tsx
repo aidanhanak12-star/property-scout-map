@@ -1,11 +1,13 @@
-import type { Property } from "@/lib/properties";
+import type { Listing } from "@/lib/listings.functions";
 
 type Props = {
-  property: Property;
+  property: Listing;
   distanceKm: number;
   selected: boolean;
   onClick: () => void;
 };
+
+const FALLBACK = "https://images.unsplash.com/photo-1568605114967-8130f3a36994?w=600&q=80";
 
 export function PropertyCard({ property, distanceKm, selected, onClick }: Props) {
   return (
@@ -16,7 +18,7 @@ export function PropertyCard({ property, distanceKm, selected, onClick }: Props)
       }`}
     >
       <img
-        src={property.image}
+        src={property.image ?? FALLBACK}
         alt={property.title}
         loading="lazy"
         className="h-24 w-28 flex-shrink-0 rounded-xl object-cover"
@@ -32,9 +34,9 @@ export function PropertyCard({ property, distanceKm, selected, onClick }: Props)
         </div>
         <p className="truncate text-sm text-muted-foreground">{property.title}</p>
         <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          <span>{property.beds} bd</span>
-          <span>{property.baths} ba</span>
-          <span>{property.sqft.toLocaleString()} sqft</span>
+          {property.beds > 0 && <span>{property.beds} bd</span>}
+          {property.baths > 0 && <span>{property.baths} ba</span>}
+          {property.sqft > 0 && <span>{property.sqft.toLocaleString()} sqft</span>}
           <span className="rounded-full bg-secondary px-2 py-0.5 text-[10px] font-medium text-secondary-foreground">
             {property.type}
           </span>
