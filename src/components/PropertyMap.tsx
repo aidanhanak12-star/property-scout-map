@@ -24,6 +24,7 @@ export function PropertyMap({
   const circleRef = useRef<google.maps.Circle | null>(null);
   const centerMarkerRef = useRef<google.maps.Marker | null>(null);
   const markersRef = useRef<Map<string, google.maps.Marker>>(new Map());
+  const infoWindowRef = useRef<google.maps.InfoWindow | null>(null);
 
   // Init map
   useEffect(() => {
